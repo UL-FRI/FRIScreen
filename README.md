@@ -76,11 +76,15 @@ the config is assumed to be located in the same folder as `index.html` and is ac
 
 **url** - url from where the media files will be read from
 
+**resize_to_fullscreen** - resized the media *(image/video)* to fit the screen. ***WARNING: This WILL distort the
+image/aspect ratio***
+
 ```json
 {
   "tO": 10,
   "tP": 5,
-  "url": "http://127.0.0.1"
+  "url": "http://127.0.0.1",
+  "resize_to_fullscreen": false
 }
 ```
 

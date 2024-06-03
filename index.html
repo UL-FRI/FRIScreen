@@ -39,6 +39,11 @@
             width: 100vw;
             object-fit: contain;
         }
+
+        video {
+            height: 100vh;
+            width: 100vw;
+        }
     </style>
 </head>
 <body>
@@ -129,10 +134,7 @@
         image.setAttribute("src", data["url"]);
         image.setAttribute("alt", data.name);
 
-        if (config["resize_to_fullscreen"]) {
-            image.style.height = `${window.innerHeight}px`;
-            image.style.width = `${window.innerWidth}px`;
-        }
+        image.style.objectFit = config["resize_to_fullscreen"] ? "fill" : "contain";
     }
 
     async function setVideoMedia(data) {
@@ -153,10 +155,7 @@
             video.play()
         }
 
-        if (config["resize_to_fullscreen"]) {
-            video.style.height = `${window.innerHeight}px`;
-            video.style.width = `${window.innerWidth}px`;
-        }
+        video.style.objectFit = config["resize_to_fullscreen"] ? "fill" : "contain";
     }
 
     function setMediaItem() {

@@ -113,7 +113,7 @@
                 data[parent].media.push(createEntry(basename(anchor.innerText), target));
             }
         }
-        
+
         if (parent === "global") {
             updatingConfig = false;
             if (image.getAttribute("src").length === 0 && video.getAttribute("src").length === 0) {
@@ -135,12 +135,23 @@
         }
     }
 
-    function setVideoMedia(data) {
+    async function setVideoMedia(data) {
         video.style.display = "block";
         image.style.display = "none";
 
         video.setAttribute("src", data["url"]);
         video.setAttribute("alt", data.name);
+
+        // Chrome has introduced a security policy which disallows playing autoplaying any audio if user hasn't interacted
+        // with the document at least once. Since this page will be non-interactive, we need to check if the video failed
+        // to start playing. If it has, we disable the audio and retry (to bypass before mentioned policies).
+        try {
+            video.muted = false;
+            await video.play();
+        } catch (error) {
+            video.muted = true;
+            video.play()
+        }
 
         if (config["resize_to_fullscreen"]) {
             video.style.height = `${window.innerHeight}px`;

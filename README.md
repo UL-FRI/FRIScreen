@@ -20,7 +20,6 @@ root/
         2.jpg
     2024-06-02T12.00.00 - 2024-06-02T23.59.59/
         3.mp4
-        
     4.png
     5.jpg
 ```
@@ -47,9 +46,9 @@ For example, the following file would be displayed for 15s: *my_avatar_15s.png*
 
 ### Video file limitations
 
-Due to browser security policies and other mechanisms, video files cannot be played if the user has not
-interacted with the document at least once. This means that the user must click on the web page or
-interact with it in any other way at least once, for video files to play properly!
+Chrome has introduced a new security policy where no audio can be automatically played, unless the user has interacted
+with the document at least once. To bypass this, we first try to play the video with audio and if it fails, we mute the
+audio and retry. ***This issue is supposedly present only on Chrome browser***
 
 **IMPORTANT:** *If you want the entire video file to play, you need to postfix it with its duration
 (ex. my_video_50s.mp4)*. Otherwise, the video will only be played for the duration specified in configuration

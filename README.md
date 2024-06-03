@@ -61,8 +61,8 @@ file  extensions *(first make sure they are compatible with HTML img and video t
 to the following array located near the start of the `index.html` file.
 
 ```javascript
-const imageFormats = ["png", "jpeg", "jpg", "webp"];
-const videoFormats = ["mov", "mp4", "mkv"];
+const imageFormats = ["apng", "avif", "bmp", "gif", "tiff", "ico", "cur", "jpg", "jpeg", "jfif", "pjpeg", "pjp", "png", "svg", "webp"];
+const videoFormats = ["mp4", "webm", "ogg"];
 ```
 
 ## Configuration file

@@ -79,6 +79,8 @@ the config is assumed to be located in the same folder as `index.html` and is ac
 **resize_to_fullscreen** - resized the media *(image/video)* to fit the screen. ***WARNING: This WILL distort the
 image/aspect ratio***
 
+**fade_ms** - duration of fade in/out (in milliseconds) 
+
 ```json
 {
   "tO": 10,

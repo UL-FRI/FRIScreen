@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>Title</title>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+
     <script>
         const configUrl = "./config.json";
 
@@ -22,6 +24,7 @@
             tP: "tP",
             url: "url",
             resize: "resize_to_fullscreen",
+            fade: "fade_ms",
 
             entry_name: "name",
             entry_url: "url"
@@ -47,7 +50,7 @@
     </style>
 </head>
 <body>
-<div style="height: 100vh; width: 100vw; display: flex; justify-content: center; align-items: center; overflow: hidden">
+<div id="container" style="height: 100vh; width: 100vw; display: flex; justify-content: center; align-items: center; overflow: hidden">
     <img id="image-container" src="" alt="Automated image" />
     <video id="video-container" src="" style="display: none" autoplay></video>
 </div>
@@ -122,7 +125,7 @@
         if (parent === "global") {
             updatingConfig = false;
             if (image.getAttribute("src").length === 0 && video.getAttribute("src").length === 0) {
-                setMediaItem();
+                await setMediaItem(false);
             }
         }
     }
@@ -158,37 +161,43 @@
         video.style.objectFit = config["resize_to_fullscreen"] ? "fill" : "contain";
     }
 
-    function setMediaItem() {
+    async function setMediaItem(fade=true) {
         // If we are currently updating configuration, we need to wait until the `data` array is repopulated
         if (updatingConfig) {
             setTimeout(setMediaItem, 200);
         }
 
-        // Find out which parent should be used for next image (checks if there are any timespan folder that
-        // match the current time). If no timespan folders are applicable, we use the `global` parent.
-        const parent = Object.keys(data).find(x => dateInUnion(Date.now(), data[x].start, data[x].end)) ?? "global";
+        // In order for fade to not be included in the image display time, we need to change the media inside the
+        // fade `complete` callback
+        $("#container").fadeOut(fade ? config[CONST.fade] : 0, () => {
+            // Find out which parent should be used for next image (checks if there are any timespan folder that
+            // match the current time). If no timespan folders are applicable, we use the `global` parent.
+            const parent = Object.keys(data).find(x => dateInUnion(Date.now(), data[x].start, data[x].end)) ?? "global";
 
-        // Retrieve the index of the next item in line from the currently displayed one or reset to beginning if
-        // current item is no longer in the media array
-        let index = Math.max(-1, data[parent].media.findIndex(x => {
-            if (image.style.display === "block") return image.alt === x.name;
-            return video.alt === x.name;
-        })) + 1;
+            // Retrieve the index of the next item in line from the currently displayed one or reset to beginning if
+            // current item is no longer in the media array
+            let index = Math.max(-1, data[parent].media.findIndex(x => {
+                if (image.style.display === "block") return image.alt === x.name;
+                return video.alt === x.name;
+            })) + 1;
 
-        if (index >= data[parent].media.length) {
-            index = 0;
-        }
+            if (index >= data[parent].media.length) {
+                index = 0;
+            }
 
-        // Handling based on file format (image/video)
-        const fileFormat = data[parent].media[index]["name"].split(".").reverse()[0];
-        if (imageFormats.includes(fileFormat)) {
-            setImageMedia(data[parent].media[index])
-        } else if (videoFormats.includes(fileFormat)) {
-            setVideoMedia(data[parent].media[index])
-        }
+            // Handling based on file format (image/video)
+            const fileFormat = data[parent].media[index]["name"].split(".").reverse()[0];
+            if (imageFormats.includes(fileFormat)) {
+                setImageMedia(data[parent].media[index])
+            } else if (videoFormats.includes(fileFormat)) {
+                setVideoMedia(data[parent].media[index])
+            }
 
-        // Trigger the next media change after tPi seconds
-        setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
+            $("#container").fadeIn(fade ? config[CONST.fade] : 0, () => {
+                // Trigger the next media change after tPi seconds
+                setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
+            })
+        });
     }
 
     async function refreshMedia(url, parent="global") {

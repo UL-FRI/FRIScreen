@@ -83,10 +83,11 @@ image/aspect ratio***
 
 ```json
 {
-  "tO": 10,
+  "tO": 300,
   "tP": 5,
   "url": "http://127.0.0.1",
-  "resize_to_fullscreen": false
+  "resize_to_fullscreen": true,
+  "fade_ms": 1000
 }
 ```
 

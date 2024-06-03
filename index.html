@@ -125,6 +125,8 @@
         if (parent === "global") {
             updatingConfig = false;
             if (image.getAttribute("src").length === 0 && video.getAttribute("src").length === 0) {
+                // Since this is the initial/first image load, we disable the fade in order to get the media displayed
+                // to screen immediately (avoid blank white screen)
                 await setMediaItem(false);
             }
         }

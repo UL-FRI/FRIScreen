@@ -1,254 +1,245 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Title</title>
+    <head>
+        <meta charset="UTF-8">
+        <title>Title</title>
 
-    <script>
-        const configUrl = "./config.json";
+        <script>
+            const dateTimeRegex = /[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}\.[0-9]{2}\.[0-9]{2}/g;
+            const fileNameTimeRegex = "(?<=_)[0-9]+(?=s\\.[a-z]*)";
 
-        const dateTimeRegex = /[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}\.[0-9]{2}\.[0-9]{2}/g;
-        const fileNameTimeRegex = "(?<=_)[0-9]+(?=s\\.[a-z]*)";
+            const imageFormats = ["apng", "avif", "bmp", "gif", "tiff", "ico", "cur", "jpg", "jpeg", "jfif", "pjpeg", "pjp", "png", "svg", "webp"];
+            const videoFormats = ["mp4", "webm", "ogg"];
 
-        const imageFormats = ["apng", "avif", "bmp", "gif", "tiff", "ico", "cur", "jpg", "jpeg", "jfif", "pjpeg", "pjp", "png", "svg", "webp"];
-        const videoFormats = ["mp4", "webm", "ogg"];
+            let config = {};
+            let data = {};
 
-        let config = {};
-        let data = {};
+            // Config constants (if you change them in config, you only need to update them here)
+            const CONST = {
+                tO: "tO",
+                tP: "tP",
+                url: "url",
+                resize: "resize_to_fullscreen",
+                fade: "fade_ms",
+            }
+        </script>
 
-        // Config constants (if you change them in config, you only need to update them here)
-        const CONST = {
-            tO: "tO",
-            tP: "tP",
-            url: "url",
-            resize: "resize_to_fullscreen",
-            fade: "fade_ms",
-
-            entry_name: "name",
-            entry_url: "url"
-        }
-    </script>
-
-    <style>
-        body {
-            padding: 0;
-            margin: 0;
-        }
-
-        img {
-            position: absolute;
-            left: 0;
-            top: 0;
-
-            height: 100vh;
-            width: 100vw;
-            object-fit: contain;
-        }
-
-        video {
-            position: absolute;
-            left: 0;
-            top: 0;
-
-            height: 100vh;
-            width: 100vw;
-        }
-    </style>
-</head>
-<body>
-<div id="container" style="height: 100vh; width: 100vw; display: flex; justify-content: center; align-items: center; overflow: hidden">
-</div>
-
-<script>
-    const container = document.getElementById("container");
-
-    let currentElement = null;
-    let updatingConfig = false;
-
-    function getISODates(name) {
-        return Array.from(name.matchAll(dateTimeRegex)).map(x => x[0]);
-    }
-
-    function dateInUnion(date, start, end) {
-        return date >= start && date <= end;
-    }
-
-    function parseDate(date) {
-        if (date === undefined) {
-            return 0;
-        }
-        return Date.parse(date.replaceAll("\.", ":"));
-    }
-
-    function basename(text) {
-        return text.split("/").reverse()[0];
-    }
-
-    function createEntry(name, url) {
-        // Tries to extract regex time from file name, otherwise it uses default tP time
-        const regexTime = name.match(fileNameTimeRegex);
-        const tPi = regexTime === null ? config[CONST.tP] : parseInt(regexTime[0]);
-        return {"name": basename(name), "url": url, "tPi": tPi};
-    }
-
-    async function parseResponse(rawHTML, url, parent) {
-        updatingConfig = true;
-
-        data[parent] = {start: 0, end: 0, media: []};
-        if (parent !== "global") {
-            const dates = getISODates(parent);
-            data[parent].start = parseDate(dates[0]);
-            data[parent].end = parseDate(dates[1]);
-        }
-
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(rawHTML, "text/html");
-
-
-        // To support different backend systems, you only need to modify this `for` loop to change the detection
-        // algorithm for files/links
-        for (const anchor of doc.getElementsByTagName("a")) {
-            // If the target `href` is a relative link (ex. href="123.png"), we build the full url by prefixing
-            // the current url we are fetching from, otherwise we use the exact value from `href`
-            const target = anchor.getAttribute("href").startsWith("http") ? anchor.getAttribute("href") :
-                `${url}/${anchor.getAttribute("href")}`.replace(/([^:])(\/\/+)/g, '$1/');
-
-            const fileExtension = basename(anchor.innerText).split(".").reverse()[0];
-
-            // If entry can be broken down to two ISO datetime strings, we treat it as time range folder
-            if (getISODates(anchor.innerText).length === 2) {
-                await refreshMedia(target, anchor.innerText);
+        <style>
+            body {
+                padding: 0;
+                margin: 0;
             }
 
-            // Otherwise treat the entry as a normal media file
-            else if (imageFormats.includes(fileExtension) || videoFormats.includes(fileExtension)) {
-                data[parent].media.push(createEntry(basename(anchor.innerText), target));
+            img, video {
+                position: absolute;
+                left: 0;
+                top: 0;
+
+                height: 100vh;
+                width: 100vw;
             }
-        }
+        </style>
+    </head>
+    <body>
+        <div id="container" style="height: 100vh; width: 100vw; display: flex; justify-content: center; align-items: center; overflow: hidden"></div>
 
-        if (parent === "global") {
-            updatingConfig = false;
-            if (currentElement === null) {
-                // Since this is the initial/first image load, we disable the fade in order to get the media displayed
-                // to screen immediately (avoid blank white screen)
-                await setMediaItem(false);
+        <script>
+            const container = document.getElementById("container");
+
+            let updatingConfig = false;
+            let currentElement = null;
+
+            function getISODates(name) {
+                return Array.from(name.matchAll(dateTimeRegex)).map(x => x[0]);
             }
-        }
-    }
 
-    function createImageMedia(data) {
-        const element = document.createElement("img");
-
-        element.setAttribute("id", "image-container");
-        element.setAttribute("src", data["url"]);
-        element.setAttribute("alt", data.name);
-
-        element.style.objectFit = config["resize_to_fullscreen"] ? "fill" : "contain";
-        element.style.display = "block";
-        element.style.opacity = "0.0";
-
-        return element;
-    }
-
-    function createVideoMedia(data) {
-        const element = document.createElement("video");
-
-        element.setAttribute("id", "video-container");
-        element.setAttribute("src", data["url"]);
-        element.setAttribute("alt", data.name);
-
-        element.style.objectFit = config["resize_to_fullscreen"] ? "fill" : "contain";
-        element.style.display = "block";
-        element.style.opacity = "0.0";
-
-        return element;
-    }
-
-    function crossFade(oldElement, newElement, duration, complete) {
-        const step = 0.01;
-        const interval = setInterval(() => {
-            if (oldElement !== null) {
-                oldElement.style.opacity = (parseFloat(oldElement.style.opacity) - step).toString();
+            function parseDate(date) {
+                if (date === undefined) {
+                    return 0;
+                }
+                return Date.parse(date.replaceAll("\.", ":"));
             }
-            newElement.style.opacity = (parseFloat(newElement.style.opacity) + step).toString();
 
-            if (parseFloat(newElement.style.opacity) >= 1.0) {
-                if (oldElement !== null) {
-                    container.removeChild(oldElement);
+            function basename(text) {
+                return text.split("/").reverse()[0];
+            }
+
+            function createEntry(name, url) {
+                const regexTime = name.match(fileNameTimeRegex);
+                const tPi = regexTime === null ? config[CONST.tP] : parseInt(regexTime[0]);
+                return {"name": basename(name), "url": url, "tPi": tPi};
+            }
+
+            async function parseResponse(rawHTML, url, parent) {
+                let tempData = {}
+
+                tempData[parent] = {start: 0, end: 0, media: []};
+                if (parent !== "global") {
+                    const dates = getISODates(parent);
+                    tempData[parent].start = parseDate(dates[0]);
+                    tempData[parent].end = parseDate(dates[1]);
                 }
 
-                newElement.style.opacity = "1.0";
-                clearInterval(interval);
-                complete();
-            }
-        }, duration * step);
-    }
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(rawHTML, "text/html");
 
-    async function setMediaItem() {
-        // If we are currently updating configuration, we need to wait until the `data` array is repopulated
-        if (updatingConfig) {
-            setTimeout(setMediaItem, 200);
-        }
+                for (const anchor of doc.getElementsByTagName("a")) {
+                    // If the target `href` is a relative link (ex. href="123.png"), we build the full url by prefixing
+                    // the current url we are fetching from, otherwise we use the exact value from `href`
+                    const href = anchor.getAttribute("href");
+                    const target = href.startsWith("http") ? href : `${url}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
 
-        // Find out which parent should be used for next image (checks if there are any timespan folder that
-        // match the current time). If no timespan folders are applicable, we use the `global` parent.
-        const parent = Object.keys(data).find(x => dateInUnion(Date.now(), data[x].start, data[x].end)) ?? "global";
+                    const fileExtension = anchor.innerText.split(".").reverse()[0].toLowerCase();
 
-        // Retrieve the index of the next item in line from the currently displayed one or reset to beginning if
-        // current item is no longer in the media array
-        let index = Math.max(-1, data[parent].media.findIndex(x => currentElement?.getAttribute("alt") === x.name)) + 1;
-        if (index >= data[parent].media.length) {
-            index = 0;
-        }
+                    // If entry can be broken down to two ISO datetime strings, we treat it as time range folder
+                    if (getISODates(anchor.innerText).length === 2) {
+                        const subfolder = await fetch(target).then(x => x.text()).then((x) => parseResponse(x, target, anchor.innerText));
+                        if (Object.values(subfolder).findIndex(x => x.media.length > 0) !== -1) {
+                            tempData = Object.assign({}, tempData, subfolder);
+                        }
+                    }
 
-        // Handling based on file format (image/video)
-        const fileFormat = data[parent].media[index]["name"].split(".").reverse()[0].toLowerCase();
-        if (imageFormats.includes(fileFormat)) {
-            const element = createImageMedia(data[parent].media[index]);
-            container.appendChild(element);
-
-            crossFade(currentElement, element, config[CONST.fade], () => {
-                currentElement = element;
-                setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
-            });
-        } else if (videoFormats.includes(fileFormat)) {
-            const element = createVideoMedia(data[parent].media[index]);
-            container.appendChild(element);
-
-            crossFade(currentElement, element, config[CONST.fade], async () => {
-                currentElement = element;
-
-                // Chrome has introduced a security policy which disallows playing autoplaying any audio if user hasn't interacted
-                // with the document at least once. Since this page will be non-interactive, we need to check if the video failed
-                // to start playing. If it has, we disable the audio and retry (to bypass before mentioned policies).
-                try {
-                    element.muted = false;
-                    await element.play();
-                } catch (error) {
-                    element.muted = true;
-                    await element.play()
+                    // Otherwise treat the entry as a normal media file
+                    else if (imageFormats.includes(fileExtension) || videoFormats.includes(fileExtension)) {
+                        tempData[parent].media.push(createEntry(basename(anchor.innerText), target));
+                    }
                 }
 
-                data[parent].media[index].tPi = element.duration;
-                currentElement = element;
+                return tempData;
+            }
 
-                // Trigger the next media change after tPi seconds
-                setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
-            })
-        }
-    }
+            function createMediaElement(tag, id, data) {
+                const element = document.createElement(tag);
 
-    async function refreshMedia(url, parent="global") {
-        await fetch(url).then(data => data.text()).then(data => parseResponse(data, url, parent));
-    }
+                element.setAttribute("src", data["url"]);
+                element.setAttribute("alt", data.name);
+                element.setAttribute("id", id);
 
-    function start(configData) {
-        config = configData;
-        setInterval(() => refreshMedia(config[CONST.url]), config[CONST.tO] * 1000);
-        refreshMedia(config[CONST.url]);
-    }
+                element.style.objectFit = config["resize_to_fullscreen"] ? "fill" : "contain";
+                element.style.display = "block";
+                element.style.opacity = "0.0";
 
-    fetch(configUrl).then(data => data.json()).then(start);
-</script>
-</body>
+                element.addEventListener("error", handleMediaError);
+
+                return element;
+            }
+
+            function crossFade(oldElement, newElement, duration, complete) {
+                const step = 0.01;
+                const interval = setInterval(() => {
+                    if (oldElement !== null) {
+                        oldElement.style.opacity = (parseFloat(oldElement.style.opacity) - step).toString();
+                    }
+                    newElement.style.opacity = (parseFloat(newElement.style.opacity) + step).toString();
+
+                    if (parseFloat(newElement.style.opacity) >= 1.0) {
+                        if (oldElement !== null) {
+                            container.removeChild(oldElement);
+                        }
+
+                        newElement.style.opacity = "1.0";
+                        clearInterval(interval);
+                        complete();
+                    }
+                }, duration * step);
+            }
+
+            async function setMediaItem() {
+                // If we are currently updating configuration, we need to wait until the `data` array is repopulated
+                if (updatingConfig) {
+                    setTimeout(setMediaItem, 200);
+                }
+
+                // Find out which parent should be used for next image (checks if there are any timespan folder that
+                // match the current time). If no timespan folders are applicable, we use the `global` parent.
+                const parent = Object.keys(data).find(x =>
+                    Date.now() >= data[x].start && Date.now() <= data[x].end
+                ) ?? "global";
+
+                // Retrieve the index of the next item in line from the currently displayed one or reset to beginning if
+                // current item is no longer in the media array
+                let index = Math.max(-1, data[parent].media.findIndex(x => currentElement?.getAttribute("alt") === x.name)) + 1;
+                if (index >= data[parent].media.length) {
+                    index = 0;
+                }
+
+                // Handling based on file format (image/video)
+                const fileExtension = data[parent].media[index]["name"].split(".").reverse()[0].toLowerCase();
+                if (imageFormats.includes(fileExtension)) {
+                    const element = createMediaElement("img", "image-container", data[parent].media[index]);
+                    container.appendChild(element);
+
+                    crossFade(currentElement, element, config[CONST.fade], () => {
+                        currentElement = element;
+                        setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
+                    });
+                } else if (videoFormats.includes(fileExtension)) {
+                    const element = createMediaElement("video", "video-container", data[parent].media[index]);
+                    container.appendChild(element);
+
+                    crossFade(currentElement, element, config[CONST.fade], async () => {
+                        currentElement = element;
+
+                        // Bypass Chrome's security policy that disables autoplay on videos that contain audio, if user
+                        // hasn't interacted with website at least once
+                        try {
+                            element.muted = false;
+                            await element.play();
+                        } catch (error) {
+                            element.muted = true;
+                            await element.play()
+                        }
+
+                        data[parent].media[index].tPi = element.duration;
+                        currentElement = element;
+
+                        // Trigger the next media change after tPi seconds
+                        setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
+                    })
+                }
+            }
+
+            // If media file cannot be loaded (probably removed), we force the refresh of media library to check for any
+            // changed/removed/added files
+            function handleMediaError() {
+                refreshMedia(config[CONST.url]);
+            }
+
+            async function refreshMedia(urls, parent="global") {
+                updatingConfig = true;
+
+                for (const url of urls) {
+                    const raw = await fetch(url).then(data => data.text()).catch(() => {});
+                    data = await parseResponse(raw, url, parent);
+
+                    if (Object.values(data).findIndex((x) => x.media.length > 0) !== -1) {
+                        updatingConfig = false;
+                        if (currentElement === null) {
+                            await setMediaItem();
+                        }
+                    }
+
+                    if (updatingConfig === false) {
+                        break;
+                    }
+                }
+            }
+
+            async function refreshConfig() {
+                const urlParams = new URLSearchParams(window.location.search);
+                config = await fetch(urlParams.get("config") ?? "./config.json").then(data => data.json());
+                await refreshMedia(config[CONST.url]);
+            }
+
+            async function start() {
+                await refreshConfig();
+
+                setInterval(() => refreshMedia(config[CONST.url]), config[CONST.tO] * 1000);
+                setInterval(() => refreshConfig(), config["config_refresh"] * 1000);
+                setTimeout(() => location.reload(), config["reload_page"] * 1000);
+            }
+
+            start();
+        </script>
+    </body>
 </html>

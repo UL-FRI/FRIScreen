@@ -1,121 +1,88 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Title</title>
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
 
-        <script>
-            const dateTimeRegex = /[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}\.[0-9]{2}\.[0-9]{2}/g;
-            const fileNameTimeRegex = "(?<=_)[0-9]+(?=s\\.[a-z]*)";
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
 
-            const imageFormats = ["apng", "avif", "bmp", "gif", "tiff", "ico", "cur", "jpg", "jpeg", "jfif", "pjpeg", "pjp", "png", "svg", "webp"];
-            const videoFormats = ["mp4", "webm", "ogg"];
+    <script>
+        const dateTimeRegex = /[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}\.[0-9]{2}\.[0-9]{2}/g;
+        const fileNameTimeRegex = "(?<=_)[0-9]+(?=s\\.[a-z]*)";
 
-            let config = {};
-            let data = {};
+        const imageFormats = ["apng", "avif", "bmp", "gif", "tiff", "ico", "cur", "jpg", "jpeg", "jfif", "pjpeg", "pjp", "png", "svg", "webp"];
+        const videoFormats = ["mp4", "webm", "ogg"];
 
-            // Config constants (if you change them in config, you only need to update them here)
-            const CONST = {
-                tO: "tO",
-                tP: "tP",
-                url: "url",
-                resize: "resize_to_fullscreen",
-                fade: "fade_ms",
-            }
-        </script>
+        let config = {};
+        let data = {};
 
-        <style>
-            body {
-                padding: 0;
-                margin: 0;
-            }
+        const UPDATE_DELAY = 200;
 
-            img, video {
-                position: absolute;
-                left: 0;
-                top: 0;
+        const CONF_MEDIA_DURATION = "tP";
+        const CONF_RESIZE_FULLSCREEN = 'resize_to_fullscreen';
+        const CONF_REFRESH_MEDIA = 'tO';
+        const CONF_REFRESH_CONF = 'config_refresh';
+        const CONF_RELOAD_PAGE = 'reload_page';
+        const CONF_FADE = 'fade_ms';
+        const CONF_URLS = 'urls';
 
-                height: 100vh;
-                width: 100vw;
-            }
-        </style>
-    </head>
+        // Config constants (if you change them in config, you only need to update them here)
+    </script>
+
+    <style>
+        body {
+            padding: 0;
+            margin: 0;
+        }
+
+        img, video {
+            position: absolute;
+            left: 0;
+            top: 0;
+
+            height: 100vh;
+            width: 100vw;
+        }
+    </style>
+</head>
     <body>
         <div id="container" style="height: 100vh; width: 100vw; display: flex; justify-content: center; align-items: center; overflow: hidden"></div>
 
         <script>
             const container = document.getElementById("container");
 
-            let updatingConfig = false;
+            let setNextMediaItemTimeout = null;
+
+            let configurationUpdating = false;
+            let mediaLibraryUpdating = false;
+            let mediaItemUpdating = false;
+
             let currentElement = null;
 
-            function getISODates(name) {
-                return Array.from(name.matchAll(dateTimeRegex)).map(x => x[0]);
-            }
+            const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
+            const ISOFromString = (name) => Array.from(name.matchAll(dateTimeRegex)).map(x => x[0]);
+            const parseDate = (date) => Date.parse(date.replaceAll("\.", ":"));
 
-            function parseDate(date) {
-                if (date === undefined) {
-                    return 0;
-                }
-                return Date.parse(date.replaceAll("\.", ":"));
-            }
-
-            function basename(text) {
-                return text.split("/").reverse()[0];
-            }
-
-            function createEntry(name, url) {
+            function createMediaItem(name, target) {
                 const regexTime = name.match(fileNameTimeRegex);
-                const tPi = regexTime === null ? config[CONST.tP] : parseInt(regexTime[0]);
-                return {"name": basename(name), "url": url, "tPi": tPi};
+                const tPi = regexTime === null ? config[CONF_MEDIA_DURATION] : parseInt(regexTime[0]);
+                return {"url": target, "name": name, "tPi": tPi};
             }
 
-            async function parseResponse(rawHTML, url, parent) {
-                let tempData = {}
-
-                tempData[parent] = {start: 0, end: 0, media: []};
-                if (parent !== "global") {
-                    const dates = getISODates(parent);
-                    tempData[parent].start = parseDate(dates[0]);
-                    tempData[parent].end = parseDate(dates[1]);
-                }
-
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(rawHTML, "text/html");
-
-                for (const anchor of doc.getElementsByTagName("a")) {
-                    // If the target `href` is a relative link (ex. href="123.png"), we build the full url by prefixing
-                    // the current url we are fetching from, otherwise we use the exact value from `href`
-                    const href = anchor.getAttribute("href");
-                    const target = href.startsWith("http") ? href : `${url}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
-
-                    const fileExtension = anchor.innerText.split(".").reverse()[0].toLowerCase();
-
-                    // If entry can be broken down to two ISO datetime strings, we treat it as time range folder
-                    if (getISODates(anchor.innerText).length === 2) {
-                        const subfolder = await fetch(target).then(x => x.text()).then((x) => parseResponse(x, target, anchor.innerText));
-                        if (Object.values(subfolder).findIndex(x => x.media.length > 0) !== -1) {
-                            tempData = Object.assign({}, tempData, subfolder);
-                        }
-                    }
-
-                    // Otherwise treat the entry as a normal media file
-                    else if (imageFormats.includes(fileExtension) || videoFormats.includes(fileExtension)) {
-                        tempData[parent].media.push(createEntry(basename(anchor.innerText), target));
-                    }
-                }
-
-                return tempData;
-            }
-
-            function createMediaElement(tag, id, data) {
+            function createMediaElement(tag, id, target) {
                 const element = document.createElement(tag);
 
-                element.setAttribute("src", data["url"]);
-                element.setAttribute("alt", data.name);
                 element.setAttribute("id", id);
+                element.setAttribute("src", target);
 
-                element.style.objectFit = config["resize_to_fullscreen"] ? "fill" : "contain";
+                element.style.objectFit = config[CONF_RESIZE_FULLSCREEN] ? "fill" : "contain";
                 element.style.display = "block";
                 element.style.opacity = "0.0";
 
@@ -124,119 +91,158 @@
                 return element;
             }
 
-            function crossFade(oldElement, newElement, duration, complete) {
+            async function crossFade(oldElement, newElement, duration) {
                 const step = 0.01;
-                const interval = setInterval(() => {
-                    if (oldElement !== null) {
-                        oldElement.style.opacity = (parseFloat(oldElement.style.opacity) - step).toString();
-                    }
+                const sleepDelay = duration * step;
+
+                while (parseFloat(newElement.style.opacity) < 1.0) {
+                    oldElement.style.opacity = (parseFloat(oldElement.style.opacity) - step).toString();
                     newElement.style.opacity = (parseFloat(newElement.style.opacity) + step).toString();
-
-                    if (parseFloat(newElement.style.opacity) >= 1.0) {
-                        if (oldElement !== null) {
-                            container.removeChild(oldElement);
-                        }
-
-                        newElement.style.opacity = "1.0";
-                        clearInterval(interval);
-                        complete();
-                    }
-                }, duration * step);
-            }
-
-            async function setMediaItem() {
-                // If we are currently updating configuration, we need to wait until the `data` array is repopulated
-                if (updatingConfig) {
-                    setTimeout(setMediaItem, 200);
+                    await sleep(sleepDelay);
                 }
 
-                // Find out which parent should be used for next image (checks if there are any timespan folder that
-                // match the current time). If no timespan folders are applicable, we use the `global` parent.
-                const parent = Object.keys(data).find(x =>
-                    Date.now() >= data[x].start && Date.now() <= data[x].end
+                oldElement.style.opacity = "0.0";
+                newElement.style.opacity = "1.0";
+            }
+
+            async function updateConfiguration() {
+                while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
+                    await sleep(UPDATE_DELAY);
+                }
+
+                configurationUpdating = true;
+                const searchParams = new URLSearchParams(window.location.search);
+                const configurationUrl = searchParams.get("config") ??"./config.json";
+                const response = await fetch(configurationUrl, {headers: {"cache-control": "no-cache"}});
+                if (response.status === 200) {
+                    config = await response.json();
+                }
+                configurationUpdating = false;
+
+                setTimeout(updateConfiguration, (config[CONF_REFRESH_CONF] ?? 1) * 1000);
+            }
+
+            async function updateMediaLibrary() {
+                while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
+                    await sleep(UPDATE_DELAY);
+                }
+
+                mediaLibraryUpdating = true;
+                for (const url of config[CONF_URLS] ?? []) {
+                    data = await fetchMediaItems(url);
+                    if (data.length !== 0) {
+                        break;
+                    }
+                }
+                mediaLibraryUpdating = false
+
+                setTimeout(updateMediaLibrary, config[CONF_REFRESH_MEDIA] * 1000);
+            }
+
+            async function fetchMediaItems(mediaUrl, parent="global", startTime=0, endTime=0) {
+                const response = await fetch(mediaUrl);
+                if (response.status !== 200) {
+                    return [];
+                }
+
+                const responseText = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(responseText, "text/html");
+
+                let result = {};
+                result[parent] = {start: startTime, end: endTime, media: []};
+
+                for (const anchor of doc.getElementsByTagName("a")) {
+                    const fileExtension = anchor.innerText.split(".").reverse()[0].toLowerCase();
+                    if (!anchor.hasAttribute("href")) {
+                        continue;
+                    }
+
+                    const href = anchor.getAttribute("href");
+                    const target = href.startsWith("http") ? href : `${mediaUrl}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
+
+                    const dates = ISOFromString(anchor.innerText);
+                    if (dates.length === 2) {
+                        const subfolder = await fetchMediaItems(target, anchor.innerText, parseDate(dates[0]), parseDate(dates[1]));
+                        if (subfolder[anchor.innerText].media.length !== 0) {
+                            result = Object.assign({}, result, subfolder);
+                        }
+                    } else if (imageFormats.includes(fileExtension) || videoFormats.includes(fileExtension)) {
+                        result[parent].media.push(createMediaItem(anchor.innerText, target));
+                    }
+                }
+
+                return result;
+            }
+
+            async function setNextMediaItem() {
+                while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
+                    await sleep(UPDATE_DELAY);
+                }
+
+                mediaItemUpdating = true;
+                const parent = Object.keys(data).find(key =>
+                    Date.now() >= data[key].start && Date.now() <= data[key].end
                 ) ?? "global";
 
-                // Retrieve the index of the next item in line from the currently displayed one or reset to beginning if
-                // current item is no longer in the media array
-                let index = Math.max(-1, data[parent].media.findIndex(x => currentElement?.getAttribute("alt") === x.name)) + 1;
+                if (!Object.keys(data).includes(parent) || data[parent].media.length === 0) {
+                    mediaItemUpdating = false;
+                    setNextMediaItemTimeout = setTimeout(setNextMediaItem, 1000);
+                    return;
+                }
+
+                let index = data[parent].media.findIndex(x => x["url"] === currentElement?.getAttribute("src")) + 1;
                 if (index >= data[parent].media.length) {
                     index = 0;
                 }
 
-                // Handling based on file format (image/video)
                 const fileExtension = data[parent].media[index]["name"].split(".").reverse()[0].toLowerCase();
-                if (imageFormats.includes(fileExtension)) {
-                    const element = createMediaElement("img", "image-container", data[parent].media[index]);
-                    container.appendChild(element);
+                const element = imageFormats.includes(fileExtension) ?
+                    createMediaElement("img", "image-container", data[parent].media[index]["url"]) :
+                    createMediaElement("video", "video-container", data[parent].media[index]["url"]);
 
-                    crossFade(currentElement, element, config[CONST.fade], () => {
-                        currentElement = element;
-                        setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
-                    });
-                } else if (videoFormats.includes(fileExtension)) {
-                    const element = createMediaElement("video", "video-container", data[parent].media[index]);
-                    container.appendChild(element);
+                container.appendChild(element);
 
-                    crossFade(currentElement, element, config[CONST.fade], async () => {
-                        currentElement = element;
-
-                        // Bypass Chrome's security policy that disables autoplay on videos that contain audio, if user
-                        // hasn't interacted with website at least once
-                        try {
-                            element.muted = false;
-                            await element.play();
-                        } catch (error) {
-                            element.muted = true;
-                            await element.play()
-                        }
-
-                        data[parent].media[index].tPi = element.duration;
-                        currentElement = element;
-
-                        // Trigger the next media change after tPi seconds
-                        setTimeout(setMediaItem, data[parent].media[index].tPi * 1000);
-                    })
+                if (container.contains(currentElement)) {
+                    await crossFade(currentElement, element, config[CONF_FADE]);
+                    container.removeChild(currentElement);
+                } else {
+                    element.style.opacity = "1.0";
                 }
-            }
 
-            // If media file cannot be loaded (probably removed), we force the refresh of media library to check for any
-            // changed/removed/added files
-            function handleMediaError() {
-                refreshMedia(config[CONST.url]);
-            }
-
-            async function refreshMedia(urls, parent="global") {
-                updatingConfig = true;
-
-                for (const url of urls) {
-                    const raw = await fetch(url).then(data => data.text()).catch(() => {});
-                    data = await parseResponse(raw, url, parent);
-
-                    if (Object.values(data).findIndex((x) => x.media.length > 0) !== -1) {
-                        updatingConfig = false;
-                        if (currentElement === null) {
-                            await setMediaItem();
-                        }
+                if (element.tagName === "VIDEO") {
+                    try {
+                        element.muted = false;
+                        await element.play();
+                    } catch {
+                        element.muted = true;
+                        await element.play();
                     }
-
-                    if (updatingConfig === false) {
-                        break;
-                    }
+                    data[parent].media[index]["tPi"] = element.duration;
                 }
+
+                currentElement = element;
+                mediaItemUpdating = false;
+
+                setNextMediaItemTimeout = setTimeout(setNextMediaItem, data[parent].media[index]["tPi"] * 1000);
             }
 
-            async function refreshConfig() {
-                const urlParams = new URLSearchParams(window.location.search);
-                config = await fetch(urlParams.get("config") ?? "./config.json").then(data => data.json());
-                await refreshMedia(config[CONST.url]);
+            async function handleMediaError() {
+                await updateMediaLibrary();
+                clearTimeout(setNextMediaItemTimeout);
+                await setNextMediaItem();
             }
 
             async function start() {
-                await refreshConfig();
+                await updateConfiguration();
+                while (Object.keys(config).length === 0) {
+                    console.log("Trying to fetch configuration file");
+                    await sleep(1000);
+                }
 
-                setInterval(() => refreshMedia(config[CONST.url]), config[CONST.tO] * 1000);
-                setInterval(() => refreshConfig(), config["config_refresh"] * 1000);
-                setTimeout(() => location.reload(), config["reload_page"] * 1000);
+                await updateMediaLibrary();
+                await setNextMediaItem();
+                setInterval(() => window.location.reload(), config[CONF_RELOAD_PAGE] * 1000);
             }
 
             start();

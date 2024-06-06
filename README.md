@@ -1,61 +1,77 @@
 # FRIScreen
 
-FRIScreen is an advanced media slideshow application/website. It allows you to define which files should be shown, at
-what time, in what order and for how long, just by modifying their names and locations.
+FRIScreen is a simple, minimal digital signage slideshow application.
+It consists of a single .html file with some JavaScript and no external dependencies.
+
 
 ## Installation
 
 ### Install website/application
-To install this application/website, you just have to download the `index.html` and `config.example.json` *(you can
-rename it to `config.json` for easier usage)* files and place them both into your web server directory.
 
-After that just access the file/website as you normally would. If you renamed your configuration file to something
-different from the default name or if you have multiple configuration file, make sure to specify the correct one in the
-[query parameter](#specify-which-configuration-file-to-use) *(see section below for more details)*.
+  1. Download index.html from this repo to your web server. 
+  2. Download config.example.json and rename it to config.json. 
+  3. Create a directory called "default". Ensure that autoindex is enabled for this directory.
+  4. Upload some images and/or movies to default.
+  5. ???
+  6. Enjoy your slideshow.
 
 ## Configuration file
-
-### Specify which configuration file to use
-
-To change the name/path of the configuration file to use, you just need to modify the query parameter when opening the
-website. The query parameter used for this is named `config`.
-
-**Examples *(the domain below is just an example and is not valid)*:**
-- [https://fri-screen.com?config=custom_config.json]() *(will use the `custom_config.json` file)*
-- [https://fri-screen.com]() *(will use the default `config.json` file)*
-
-### Configuration variables
-
-| Key                      | Type           | Description                                                                                                         |
-|--------------------------|----------------|---------------------------------------------------------------------------------------------------------------------|
-| **tO**                   | *integer*      | time *(in seconds)* after which the media from `urls` will be refreshed                                             |
-| **tP**                   | *integer*      | default time *(in seconds)* for media to be displayed for *(only used if duration is not present in the file name)* |
-| **urls**                 | *list[string]* | a list of url addresses from which to fetch the media files from                                                    |
-| **resize_to_fullscreen** | *boolean*      | resizes the media *(images/videos)* to fit the screen ***(WARNING: This WILL distort the image/aspect ratio)***     |
-| **fade_ms**              | *integer*      | duration of the cross fade *(in milliseconds)*                                                                      |
-| **config_refresh**       | *integer*      | time *(in seconds)* after which the configuration file will be refreshed                                            |
-| **reload_page**          | *integer*      | time *(in seconds)* after which the page will be reloaded/refreshed                                                 |
 
 ### Example configuration file
 
 ```json
 {
-  "tO": 300,
-  "tP": 3,
-  "url": ["http://127.0.0.1/media/", "http://127.0.0.1/default/"],
+  "urls": ["./screen1", "./default"],
+  "refresh": 30,
+  "present": 10,
   "resize_to_fullscreen": true,
   "fade_ms": 500,
-
-  "config_refresh": 10,
+  "config_refresh": 20,
   "reload_page": 600
 }
 ```
 
+### Configuration variables
+
+| Key                      | Type           | Description                                                                                                         |
+|--------------------------|----------------|---------------------------------------------------------------------------------------------------------------------|
+| **urls**                 | *list[string]* | a list of url addresses to fetch the media files from                                                    |
+| **refresh**                   | *integer*      | time *(in seconds)* after which the shlideshow from `urls` will be refreshed                                            |
+| **present**                   | *integer*      | default time *(in seconds)* for each image to be displayed (can be overwritten by renaming the file, see *Changing the display duration* below ) |
+| **resize_to_fullscreen** | *boolean*      | resizes the media *(images/videos)* to fit the screen ***(WARNING: This WILL distort the image/aspect ratio)***     |
+| **fade_ms**              | *integer*      | duration of the cross fade *(in milliseconds)*                                                                      |
+| **config_refresh**       | *integer*      | time *(in seconds)* after which the configuration file will be refreshed                                            |
+| **reload_page**          | *integer*      | time *(in seconds)* after which the page will be reloaded/refreshed                                                 |
+
+### Changing the config file / per-screen configuration
+
+The `urls` parameter in the configuration file may contain multiple sources. You can use this to create per-screen slideshows.
+
+Usually, must screens in a venue will display the same slideshow. Occasionally, one might want to change this slideshow to something specific (for example, display "LUNCH" on the screen in the main lobby, but not in front of each lecture room). A user can do this by setting `urls` to something like:
+
+```
+[ "./lobby", "./default" ]
+```
+
+Then, place an image of "LUNCH" (e.g. lunch.png) in *lobby/lunch.png*. Once lunch is over, simply rename, remove or empty the *lobby/* directory. The slideshow will revert to whatever is in *default/*.
+
+FRIScreen will try to load each URL from urls in turn. As soon as one returns a non-empty list of links, it will be used for the slideshow.
+
+With multiple screens, each screen will require a separate `urls`. This is done by specifying the config file.
+
+To change the name/path of the configuration file to use, modify the query parameter when opening the
+website. The query parameter used for this is named `config`.
+
+**Examples *(the domain below is just an example and is not valid)*:**
+- [https://fri-screen.com?config=lobby_config.json]() *(will use the `lobby_config.json` file)*
+- [https://fri-screen.com]() *(will use the default `config.json` file)*
+
+
 ## Media configuration
 
-### File-specific display duration
+### Changing the display duration
 
-By default, every file is displayed for `tP` seconds *(retrieved from configuration file)*. If we want certain files
+By default, every file is displayed for `present` seconds *(retrieved from configuration file)*. If we want certain files
 to be displayed for shorter/longer periods of time, we can append `_XXXs` postfix after the file name and before
 the file extension.
 
@@ -91,7 +107,7 @@ In the example above, on 2nd of June, for the **first 12 hours of the day** the 
 will be displayed: `1.png` and `2.jpg`. For the **second 12 hours of the day** the `3.mp4` file will be displayed. And
 for all other days/times, the global files *(outside of directories)* will be displayed: `4.png`, `5.jpg`.
 
-### Supported file formats
+## Supported file formats
 
 Currently, support for most common image and video file formats has been added. We covered ***ALL*** supported video
 formats *(mp4, webm, ogg)* and a lot of different image formats.
@@ -118,3 +134,7 @@ formats *(mp4, webm, ogg)* and a lot of different image formats.
 - mp4
 - webm
 - ogg
+
+## Supported browsers
+
+This application is regularly tested in Chromium and Firefox. Your mileage may vary on Safari. Patches are welcome.

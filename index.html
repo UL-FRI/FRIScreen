@@ -120,7 +120,7 @@
                 mediaLibraryUpdating = true;
                 for (const url of config[CONF_URLS] ?? []) {
                     data = await fetchMediaItems(url);
-                    if (data.length !== 0) {
+                    if (Object.values(data).findIndex(x => x.media.length > 0) !== -1) {
                         break;
                     }
                 }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>FRIScreen</title>
     <script>
-        const dateTimeRegex = /[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}\.[0-9]{2}\.[0-9]{2}/g;
+        const dateTimeRegex = /[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}/g;
         const fileNameTimeRegex = "(?<=_)[0-9]+(?=s\\.[a-z]*)";
 
         const imageFormats = ["apng", "avif", "bmp", "gif", "tiff", "ico", "cur", "jpg", "jpeg", "jfif", "pjpeg", "pjp", "png", "svg", "webp"];
@@ -57,8 +57,7 @@
             let currentElement = null;
 
             const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
-            const ISOFromString = (name) => Array.from(name.matchAll(dateTimeRegex)).map(x => x[0]);
-            const parseDate = (date) => Date.parse(date.replaceAll("\.", ":"));
+            const ISOFromString = (name) => Array.from(name.replace(/\./g, ':').matchAll(dateTimeRegex)).map(x => Date.parse(x[0]));
 
             function createMediaItem(name, target) {
                 const regexTime = name.match(fileNameTimeRegex);
@@ -143,22 +142,24 @@
                 result[parent] = {start: startTime, end: endTime, media: []};
 
                 for (const anchor of doc.getElementsByTagName("a")) {
-                    const fileExtension = anchor.innerText.split(".").reverse()[0].toLowerCase();
+                    
                     if (!anchor.hasAttribute("href")) {
                         continue;
                     }
 
                     const href = anchor.getAttribute("href");
                     const target = href.startsWith("http") ? href : `${mediaUrl}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
-
-                    const dates = ISOFromString(anchor.innerText);
+                    // const fname = anchor.innerText;
+                    const fname = target.replace(/\/$/, '').replace(/.*\//, '');
+                    const fileExtension = fname.split(".").reverse()[0].toLowerCase();
+                    const dates = ISOFromString(fname);
                     if (dates.length === 2) {
-                        const subfolder = await fetchMediaItems(target, anchor.innerText, parseDate(dates[0]), parseDate(dates[1]));
-                        if (subfolder[anchor.innerText].media.length !== 0) {
+                        const subfolder = await fetchMediaItems(target, fname, dates[0], dates[1]);
+                        if (subfolder[fname].media.length !== 0) {
                             result = Object.assign({}, result, subfolder);
                         }
                     } else if (imageFormats.includes(fileExtension) || videoFormats.includes(fileExtension)) {
-                        result[parent].media.push(createMediaItem(anchor.innerText, target));
+                        result[parent].media.push(createMediaItem(fname, target));
                     }
                 }
 

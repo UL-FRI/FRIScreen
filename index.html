@@ -23,220 +23,308 @@
         const CONF_FADE = 'fade_ms';
         const CONF_URLS = 'urls';
 
-        // Config constants (if you change them in config, you only need to update them here)
+        let setNextMediaItemTimeout = null;
+
+        let configurationUpdating = false;
+        let mediaLibraryUpdating = false;
+        let mediaItemUpdating = false;
+
+        let currentElement = null;
+
+        const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
+        const ISOFromString = (name) => Array.from(name.replace(/\./g, ':').matchAll(dateTimeRegex)).map(x => Date.parse(x[0]));
+
+        function createMediaItem(name, target) {
+            const regexTime = name.match(fileNameTimeRegex);
+            const tPi = regexTime === null ? config[CONF_MEDIA_DURATION] : parseInt(regexTime[0]);
+            return {"url": target, "name": name, "tPi": tPi};
+        }
+
+        function createMediaElement(tag, id, target) {
+            const element = document.createElement(tag);
+
+            element.setAttribute("id", id);
+            element.setAttribute("src", target);
+
+            // Use fill or contain
+            element.style.objectFit = config[CONF_RESIZE_FULLSCREEN] ? "fill" : "contain";
+
+            // Start with fully transparent (for fade-in)
+            element.style.opacity = "0";
+
+            // Handle error gracefully
+            element.addEventListener("error", handleMediaError);
+
+            return element;
+        }
+
+        /**
+         * Fades out oldElement (if any) and fades in newElement using CSS transitions.
+         * duration: the number of milliseconds for the transition.
+         */
+        async function fadeTransition(oldElement, newElement, duration) {
+            // Apply transition styles for the new element
+            newElement.style.transition = `opacity ${duration}ms linear`;
+            newElement.style.opacity = "0"; // ensure it starts invisible
+
+            // Add new element to the container first
+            container.appendChild(newElement);
+
+            // Force reflow before changing opacity, so that transition occurs
+            // (this can be done by reading layout properties)
+            newElement.getBoundingClientRect(); 
+
+            // Fade in the new element
+            newElement.style.opacity = "1";
+
+            // Wait for the transition to finish
+            await new Promise((resolve) => setTimeout(resolve, duration));
+
+            // If there's an old element, remove it after the transition
+            if (oldElement && container.contains(oldElement)) {
+                container.removeChild(oldElement);
+            }
+        }
+
+        async function updateConfiguration() {
+            while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
+                await sleep(UPDATE_DELAY);
+            }
+
+            configurationUpdating = true;
+            const searchParams = new URLSearchParams(window.location.search);
+            const configurationUrl = searchParams.get("config") ?? "./config.json";
+            const response = await fetch(configurationUrl, {headers: {"cache-control": "no-cache"}});
+            if (response.status === 200) {
+                config = await response.json();
+            }
+            configurationUpdating = false;
+
+            setTimeout(updateConfiguration, (config[CONF_REFRESH_CONF] ?? 1) * 1000);
+        }
+
+        async function updateMediaLibrary() {
+            while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
+                await sleep(UPDATE_DELAY);
+            }
+
+            mediaLibraryUpdating = true;
+            for (const url of config[CONF_URLS] ?? []) {
+                data = await fetchMediaItems(url);
+                // If any set of media is found, stop
+                if (Object.values(data).findIndex(x => x.media.length > 0) !== -1) {
+                    break;
+                }
+            }
+            mediaLibraryUpdating = false;
+
+            setTimeout(updateMediaLibrary, config[CONF_REFRESH_MEDIA] * 1000);
+        }
+
+        async function fetchMediaItems(mediaUrl, parent="global", startTime=0, endTime=0) {
+            const response = await fetch(mediaUrl);
+            if (response.status !== 200) {
+                return [];
+            }
+
+            const responseText = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(responseText, "text/html");
+
+            // Drop blobs from result to the garbage collector
+            data[parent]?.media?.forEach(x => URL.revokeObjectURL(x.blob));
+
+            let result = {};
+            result[parent] = {start: startTime, end: endTime, media: []};
+
+            for (const anchor of doc.getElementsByTagName("a")) {
+                if (!anchor.hasAttribute("href")) {
+                    continue;
+                }
+
+                const href = anchor.getAttribute("href");
+                const target = href.startsWith("http") ? href : `${mediaUrl}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
+                const fname = target.replace(/\/$/, '').replace(/.*\//, '');
+                const fileExtension = fname.split(".").reverse()[0].toLowerCase();
+                const dates = ISOFromString(fname);
+
+                // If anchor is a folder with date-range naming, recurse
+                if (dates.length === 2) {
+                    const subfolder = await fetchMediaItems(target, fname, dates[0], dates[1]);
+                    if (subfolder[fname].media.length !== 0) {
+                        result = Object.assign({}, result, subfolder);
+                    }
+                }
+                // Otherwise if it's an image or video
+                else if (imageFormats.includes(fileExtension) || videoFormats.includes(fileExtension)) {
+                    result[parent].media.push(createMediaItem(fname, target));
+                }
+            }
+
+            return result;
+        }
+
+        async function setNextMediaItem(prefetchedMediaUrlObject, index) {
+            while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
+                await sleep(UPDATE_DELAY);
+            }
+            mediaItemUpdating = true;
+
+            // Find the correct "parent" key based on current time
+            const parent = Object.keys(data).find(key =>
+                Date.now() >= data[key].start && Date.now() <= data[key].end
+            ) ?? "global";
+
+            // If no valid parent or no media
+            if (!data[parent] || data[parent].media.length === 0) {
+                mediaItemUpdating = false;
+                setNextMediaItemTimeout = setTimeout(() => setNextMediaItem(), 1000);
+                return;
+            }
+
+            // Find the next index to display
+            // (which is currentElement's index + 1 in the array, modulo the length)
+            index = (index == undefined || index >= data[parent].media.length) ? 0 : index;
+
+            // If we were given a prefetched blob URL, use it
+            // otherwise fall back to the original media URL
+            if (prefetchedMediaUrlObject) {
+                data[parent].media[index].blob = prefetchedMediaUrlObject;
+            }
+            const url = data[parent].media[index].blob || data[parent].media[index].url;
+            console.log('I am showing', data[parent].media[index].url);
+            
+            // Figure out the file extension
+            const fileExtension = data[parent].media[index].name
+                .split(".")
+                .pop()
+                .toLowerCase();
+
+            // Create the new media element (img or video)
+            const newElement = imageFormats.includes(fileExtension)
+                ? createMediaElement("img", "image-container", url)
+                : createMediaElement("video", "video-container", url);
+
+            // Perform the fade transition
+            await fadeTransition(currentElement, newElement, config[CONF_FADE]);
+
+            // If it's a video, attempt to play it
+            if (newElement.tagName === "VIDEO") {
+                try {
+                    newElement.muted = false;
+                    await newElement.play();
+                } catch {
+                    // If unmuted playback fails (due to autoplay rules), try muted
+                    newElement.muted = true;
+                    await newElement.play();
+                }
+                // Update the duration to the actual video length (if available)
+                data[parent].media[index].tPi = 
+                    newElement.duration || data[parent].media[index].tPi;
+            }
+
+            // Update our reference to the current element
+            currentElement = newElement;
+            mediaItemUpdating = false;
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // NOW PREFETCH THE NEXT ITEM (NON-BLOCKING)
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            //
+            // Next index (wrapping around)
+            const nextIndex = (index + 1) >= data[parent].media.length ? 0 : (index + 1);
+            const nextUrl = data[parent].media[nextIndex].url;
+
+            // Start fetching the next media *in parallel* (don't block here).
+            // We'll get a blob URL or, if something fails, we default back to the original.
+            const nextMediaFetch = fetch(nextUrl)
+                .then(resp => {
+                    if (!resp.ok) {
+                        throw new Error(`Failed to fetch: ${resp.status}`);
+                    }
+                    return resp.blob();
+                })
+                .then(blob => URL.createObjectURL(blob))
+                .catch(err => {
+                    console.warn("Prefetch failed:", err);
+                    // Fall back to the raw URL if prefetch fails
+                    return nextUrl;
+                });
+
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            // SCHEDULE THE NEXT CALL
+            // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            //
+            // Wait tPi seconds, then use the prefetched blob URL
+            setNextMediaItemTimeout = setTimeout(async () => {
+                // Wait for our parallel fetch to finish
+                const nextMediaBlobUrl = await nextMediaFetch;
+                // Call setNextMediaItem() with the newly prefetched blob URL
+                setNextMediaItem(nextMediaBlobUrl, nextIndex);
+            }, data[parent].media[index].tPi * 1000);
+            console.log('I have prefetched', nextUrl, 'this is index', nextIndex, 'of', data[parent].media.length);
+        }
+
+
+        async function handleMediaError() {
+            // Reload the media library to see if there's something else to show
+            await updateMediaLibrary();
+            clearTimeout(setNextMediaItemTimeout);
+            await setNextMediaItem();
+        }
+
+        async function start() {
+            await updateConfiguration();
+            while (Object.keys(config).length === 0) {
+                console.log("Trying to fetch configuration file");
+                await sleep(1000);
+            }
+
+            await updateMediaLibrary();
+            await setNextMediaItem();
+
+            // Reload the page occasionally if configured
+            setInterval(() => window.location.reload(), config[CONF_RELOAD_PAGE] * 1000);
+        }
     </script>
 
     <style>
-        body {
+        body, html {
             padding: 0;
             margin: 0;
+            height: 100%;
+            background-color: black;
+        }
+
+        #container {
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative; /* so absolutely positioned media are contained */
         }
 
         img, video {
             position: absolute;
             left: 0;
             top: 0;
-
             height: 100vh;
             width: 100vw;
+
+            /* Keep them on top of each other, use transition in JavaScript if needed */
+            /* If you prefer class-based approach, you can define .fade-in, .fade-out classes here. */
         }
     </style>
 </head>
-    <body>
-        <div id="container" style="height: 100vh; width: 100vw; display: flex; justify-content: center; align-items: center; overflow: hidden"></div>
+<body>
+    <div id="container"></div>
 
-        <script>
-            const container = document.getElementById("container");
-
-            let setNextMediaItemTimeout = null;
-
-            let configurationUpdating = false;
-            let mediaLibraryUpdating = false;
-            let mediaItemUpdating = false;
-
-            let currentElement = null;
-
-            const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
-            const ISOFromString = (name) => Array.from(name.replace(/\./g, ':').matchAll(dateTimeRegex)).map(x => Date.parse(x[0]));
-
-            function createMediaItem(name, target) {
-                const regexTime = name.match(fileNameTimeRegex);
-                const tPi = regexTime === null ? config[CONF_MEDIA_DURATION] : parseInt(regexTime[0]);
-                return {"url": target, "name": name, "tPi": tPi};
-            }
-
-            function createMediaElement(tag, id, target) {
-                const element = document.createElement(tag);
-
-                element.setAttribute("id", id);
-                element.setAttribute("src", target);
-
-                element.style.objectFit = config[CONF_RESIZE_FULLSCREEN] ? "fill" : "contain";
-                element.style.display = "block";
-                element.style.opacity = "0.0";
-
-                element.addEventListener("error", handleMediaError);
-
-                return element;
-            }
-
-            async function crossFade(oldElement, newElement, duration) {
-                const step = 0.01;
-                const sleepDelay = duration * step;
-
-                while (parseFloat(newElement.style.opacity) < 1.0) {
-                    oldElement.style.opacity = (parseFloat(oldElement.style.opacity) - step).toString();
-                    newElement.style.opacity = (parseFloat(newElement.style.opacity) + step).toString();
-                    await sleep(sleepDelay);
-                }
-
-                oldElement.style.opacity = "0.0";
-                newElement.style.opacity = "1.0";
-            }
-
-            async function updateConfiguration() {
-                while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
-                    await sleep(UPDATE_DELAY);
-                }
-
-                configurationUpdating = true;
-                const searchParams = new URLSearchParams(window.location.search);
-                const configurationUrl = searchParams.get("config") ??"./config.json";
-                const response = await fetch(configurationUrl, {headers: {"cache-control": "no-cache"}});
-                if (response.status === 200) {
-                    config = await response.json();
-                }
-                configurationUpdating = false;
-
-                setTimeout(updateConfiguration, (config[CONF_REFRESH_CONF] ?? 1) * 1000);
-            }
-
-            async function updateMediaLibrary() {
-                while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
-                    await sleep(UPDATE_DELAY);
-                }
-
-                mediaLibraryUpdating = true;
-                for (const url of config[CONF_URLS] ?? []) {
-                    data = await fetchMediaItems(url);
-                    if (Object.values(data).findIndex(x => x.media.length > 0) !== -1) {
-                        break;
-                    }
-                }
-                mediaLibraryUpdating = false
-
-                setTimeout(updateMediaLibrary, config[CONF_REFRESH_MEDIA] * 1000);
-            }
-
-            async function fetchMediaItems(mediaUrl, parent="global", startTime=0, endTime=0) {
-                const response = await fetch(mediaUrl);
-                if (response.status !== 200) {
-                    return [];
-                }
-
-                const responseText = await response.text();
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(responseText, "text/html");
-
-                let result = {};
-                result[parent] = {start: startTime, end: endTime, media: []};
-
-                for (const anchor of doc.getElementsByTagName("a")) {
-                    
-                    if (!anchor.hasAttribute("href")) {
-                        continue;
-                    }
-
-                    const href = anchor.getAttribute("href");
-                    const target = href.startsWith("http") ? href : `${mediaUrl}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
-                    // const fname = anchor.innerText;
-                    const fname = target.replace(/\/$/, '').replace(/.*\//, '');
-                    const fileExtension = fname.split(".").reverse()[0].toLowerCase();
-                    const dates = ISOFromString(fname);
-                    if (dates.length === 2) {
-                        const subfolder = await fetchMediaItems(target, fname, dates[0], dates[1]);
-                        if (subfolder[fname].media.length !== 0) {
-                            result = Object.assign({}, result, subfolder);
-                        }
-                    } else if (imageFormats.includes(fileExtension) || videoFormats.includes(fileExtension)) {
-                        result[parent].media.push(createMediaItem(fname, target));
-                    }
-                }
-
-                return result;
-            }
-
-            async function setNextMediaItem() {
-                while (configurationUpdating || mediaLibraryUpdating || mediaItemUpdating) {
-                    await sleep(UPDATE_DELAY);
-                }
-
-                mediaItemUpdating = true;
-                const parent = Object.keys(data).find(key =>
-                    Date.now() >= data[key].start && Date.now() <= data[key].end
-                ) ?? "global";
-
-                if (!Object.keys(data).includes(parent) || data[parent].media.length === 0) {
-                    mediaItemUpdating = false;
-                    setNextMediaItemTimeout = setTimeout(setNextMediaItem, 1000);
-                    return;
-                }
-
-                let index = data[parent].media.findIndex(x => x["url"] === currentElement?.getAttribute("src")) + 1;
-                if (index >= data[parent].media.length) {
-                    index = 0;
-                }
-
-                const fileExtension = data[parent].media[index]["name"].split(".").reverse()[0].toLowerCase();
-                const element = imageFormats.includes(fileExtension) ?
-                    createMediaElement("img", "image-container", data[parent].media[index]["url"]) :
-                    createMediaElement("video", "video-container", data[parent].media[index]["url"]);
-
-                container.appendChild(element);
-
-                if (container.contains(currentElement)) {
-                    await crossFade(currentElement, element, config[CONF_FADE]);
-                    container.removeChild(currentElement);
-                } else {
-                    element.style.opacity = "1.0";
-                }
-
-                if (element.tagName === "VIDEO") {
-                    try {
-                        element.muted = false;
-                        await element.play();
-                    } catch {
-                        element.muted = true;
-                        await element.play();
-                    }
-                    data[parent].media[index]["tPi"] = element.duration;
-                }
-
-                currentElement = element;
-                mediaItemUpdating = false;
-
-                setNextMediaItemTimeout = setTimeout(setNextMediaItem, data[parent].media[index]["tPi"] * 1000);
-            }
-
-            async function handleMediaError() {
-                await updateMediaLibrary();
-                clearTimeout(setNextMediaItemTimeout);
-                await setNextMediaItem();
-            }
-
-            async function start() {
-                await updateConfiguration();
-                while (Object.keys(config).length === 0) {
-                    console.log("Trying to fetch configuration file");
-                    await sleep(1000);
-                }
-
-                await updateMediaLibrary();
-                await setNextMediaItem();
-                setInterval(() => window.location.reload(), config[CONF_RELOAD_PAGE] * 1000);
-            }
-
-            start();
-        </script>
-    </body>
+    <script>
+        // Grab container from the DOM
+        const container = document.getElementById("container");
+        start();
+    </script>
+</body>
 </html>

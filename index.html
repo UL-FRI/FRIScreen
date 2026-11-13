@@ -143,7 +143,7 @@
                 }
 
                 const href = anchor.getAttribute("href");
-                const target = href.startsWith("http") ? href : `${mediaUrl}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
+                const target = (href.startsWith("http") || href.startsWith('/')) ? href : `${mediaUrl}/${href}`.replace(/([^:])(\/\/+)/g, '$1/');
                 const fname = target.replace(/\/$/, '').replace(/.*\//, '');
                 const fileExtension = fname.split(".").reverse()[0].toLowerCase();
                 const dates = ISOFromString(fname);

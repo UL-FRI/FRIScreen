@@ -24,6 +24,7 @@
         const CONF_URLS = 'urls';
 
         let setNextMediaItemTimeout = null;
+        let updateMediaLibraryTimeout = null;
 
         let configurationUpdating = false;
         let mediaLibraryUpdating = false;
@@ -118,7 +119,7 @@
             }
             mediaLibraryUpdating = false;
 
-            setTimeout(updateMediaLibrary, config[CONF_REFRESH_MEDIA] * 1000);
+            updateMediaLibraryTimeout = setTimeout(updateMediaLibrary, config[CONF_REFRESH_MEDIA] * 1000);
         }
 
         async function fetchMediaItems(mediaUrl, parent="global", startTime=0, endTime=0) {
@@ -268,6 +269,7 @@
 
         async function handleMediaError() {
             // Reload the media library to see if there's something else to show
+            clearTimeout(updateMediaLibraryTimeout);
             await updateMediaLibrary();
             clearTimeout(setNextMediaItemTimeout);
             await setNextMediaItem();

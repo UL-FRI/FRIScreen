@@ -12,6 +12,7 @@
 
         let config = {};
         let data = {};
+        let cachedBlobs = {};
 
         const UPDATE_DELAY = 200;
 
@@ -34,6 +35,9 @@
 
         const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay));
         const ISOFromString = (name) => Array.from(name.replace(/\./g, ':').matchAll(dateTimeRegex)).map(x => Date.parse(x[0]));
+        const getCurrentParent = () => Object.keys(data).find(key =>
+            Date.now() >= data[key].start && Date.now() <= data[key].end
+        ) ?? "global";
 
         function createMediaItem(name, target) {
             const regexTime = name.match(fileNameTimeRegex);
@@ -117,6 +121,18 @@
                     break;
                 }
             }
+
+            // Garbage-collect unused blobs
+            const parent = getCurrentParent();
+            let urls = data[parent]?.media?.map(x => x.url);
+            Object.keys(cachedBlobs)
+                .filter(url => urls.indexOf(url) === -1)
+                .forEach(url => {
+                    cachedBlobs[url].then(URL.revokeObjectURL);
+                    delete cachedBlobs[url];
+                    console.log("I garbage collected", url);
+                });
+
             mediaLibraryUpdating = false;
 
             updateMediaLibraryTimeout = setTimeout(updateMediaLibrary, config[CONF_REFRESH_MEDIA] * 1000);
@@ -131,9 +147,6 @@
             const responseText = await response.text();
             const parser = new DOMParser();
             const doc = parser.parseFromString(responseText, "text/html");
-
-            // Drop blobs from result to the garbage collector
-            data[parent]?.media?.forEach(x => URL.revokeObjectURL(x.blob));
 
             let result = {};
             result[parent] = {start: startTime, end: endTime, media: []};
@@ -172,9 +185,7 @@
             mediaItemUpdating = true;
 
             // Find the correct "parent" key based on current time
-            const parent = Object.keys(data).find(key =>
-                Date.now() >= data[key].start && Date.now() <= data[key].end
-            ) ?? "global";
+            const parent = getCurrentParent();
 
             // If no valid parent or no media
             if (!data[parent] || data[parent].media.length === 0) {
@@ -237,8 +248,7 @@
             const nextUrl = data[parent].media[nextIndex].url;
 
             // Start fetching the next media *in parallel* (don't block here).
-            // We'll get a blob URL or, if something fails, we default back to the original.
-            const nextMediaFetch = fetch(nextUrl)
+            cachedBlobs[nextUrl] ??= fetch(nextUrl)
                 .then(resp => {
                     if (!resp.ok) {
                         throw new Error(`Failed to fetch: ${resp.status}`);
@@ -248,8 +258,8 @@
                 .then(blob => URL.createObjectURL(blob))
                 .catch(err => {
                     console.warn("Prefetch failed:", err);
-                    // Fall back to the raw URL if prefetch fails
-                    return nextUrl;
+                    // Do not save the rejected promise
+                    delete cachedBlobs[nextUrl];
                 });
 
             // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -258,12 +268,12 @@
             //
             // Wait tPi seconds, then use the prefetched blob URL
             setNextMediaItemTimeout = setTimeout(async () => {
-                // Wait for our parallel fetch to finish
-                const nextMediaBlobUrl = await nextMediaFetch;
+                // Fall back to the original URL if prefetch failed
+                const nextMediaBlobUrl = await cachedBlobs[nextUrl] ?? nextUrl;
                 // Call setNextMediaItem() with the newly prefetched blob URL
                 setNextMediaItem(nextMediaBlobUrl, nextIndex);
             }, data[parent].media[index].tPi * 1000);
-            console.log('I have prefetched', nextUrl, 'this is index', nextIndex, 'of', data[parent].media.length);
+            console.log('I am prefetching', nextUrl, 'this is index', nextIndex, 'of', data[parent].media.length);
         }
 
 
